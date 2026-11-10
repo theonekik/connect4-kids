@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Four in a Row | Game for Manav</title>
+<meta name="description" content="Four in a Row: a free Connect 4 game for kids. Play against a friend or the computer. No ads, no tracking, no accounts. Made for Manav.">
+<style>
+  :root{
+    --paper:#f4ede0;
+    --paper-2:#e9dfcd;
+    --ink:#25313a;
+    --ink-soft:#6c7a83;
+    --board:#2f5d73;
+    --board-edge:#244755;
+    --p1:#e4573d;
+    --p1-hi:#f78a6d;
+    --p2:#f0b134;
+    --p2-hi:#ffd473;
+    --cell: clamp(30px, 9.2vmin, 68px);
+    --gap: calc(var(--cell) * 0.16);
+    --radius: calc(var(--cell) * 0.5);
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(120% 100% at 50% 0%, #faf5ea 0%, var(--paper) 45%, var(--paper-2) 100%);
+    color:var(--ink);
+    font-family: ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN", -apple-system,
+                 BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    display:grid;
+    place-items:center;
+    padding:24px 16px 32px;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .stage{display:flex;flex-direction:column;align-items:center;gap:18px;width:100%;max-width:720px}
+
+  header{text-align:center}
+  h1{
+    font-size:clamp(26px,4.6vmin,40px);
+    letter-spacing:-0.02em;
+    font-weight:800;
+    line-height:1.1;
+  }
+  h1 span{color:var(--p1)}
+  h1 i{font-style:normal;color:var(--p2)}
+  .tagline{
+    margin-top:8px;
+    font-size:clamp(12px,1.5vmin,14px);
+    letter-spacing:0.16em;
+    text-transform:uppercase;
+    font-weight:700;
+    color:var(--ink-soft);
+  }
+
+  /* ---------- turn + score ---------- */
+  .hud{
+    display:flex;align-items:center;justify-content:center;gap:10px;
+    flex-wrap:wrap;width:100%;
+  }
+  .turn{
+    display:inline-flex;align-items:center;gap:10px;
+    background:#fff;
+    border:1px solid #ddd2bd;
+    border-radius:999px;
+    padding:9px 18px 9px 12px;
+    font-size:15px;font-weight:700;
+    box-shadow:0 2px 0 #e2d7c2, 0 8px 18px -12px rgba(37,49,58,.5);
+  }
+  .turn .chip{
+    width:22px;height:22px;border-radius:50%;
+    background:radial-gradient(circle at 33% 30%, var(--p1-hi), var(--p1) 62%, #b93a26);
+    box-shadow:inset 0 -2px 4px rgba(0,0,0,.28);
+    transition:background .3s;
+  }
+  .turn.p2 .chip{
+    background:radial-gradient(circle at 33% 30%, var(--p2-hi), var(--p2) 62%, #c98a16);
+  }
+  .score{
+    display:flex;gap:6px;align-items:center;
+    font-size:14px;font-weight:700;color:var(--ink-soft);
+    letter-spacing:.01em;
+  }
+  .score b{color:var(--ink);font-variant-numeric:tabular-nums}
+  .score .sep{opacity:.4}
+
+  /* ---------- board ---------- */
+  .board-shell{
+    position:relative;
+    padding: calc(var(--gap) * 1.5);
+    border-radius: calc(var(--cell) * .34);
+    background:
+      linear-gradient(180deg, #356880 0%, var(--board) 22%, var(--board-edge) 100%);
+    box-shadow:
+      inset 0 2px 0 rgba(255,255,255,.22),
+      inset 0 -6px 14px rgba(0,0,0,.32),
+      0 18px 30px -18px rgba(24,42,53,.7),
+      0 3px 0 #1b3742;
+  }
+  .board{
+    position:relative;
+    display:grid;
+    grid-template-columns:repeat(7, var(--cell));
+    grid-template-rows:repeat(6, var(--cell));
+    gap:var(--gap);
+    --cell: clamp(30px, 9.2vmin, 68px);
+  }
+
+  .col{position:relative;display:contents}
+
+  .cell{
+    position:relative;
+    width:var(--cell);height:var(--cell);
+    border-radius:50%;
+    background:
+      radial-gradient(circle at 50% 34%, #17323d 0%, #1d3d4a 55%, #2a5567 100%);
+    box-shadow:
+      inset 0 3px 6px rgba(0,0,0,.5),
+      inset 0 -2px 3px rgba(255,255,255,.13);
+    cursor:pointer;
+    display:grid;
+    place-items:center;
+  }
+  .cell:focus-visible{
+    outline:3px solid #ffffff;
+    outline-offset:3px;
+  }
+
+  /* ghost preview when hovering a column */
+  .cell.ghost::after{
+    content:"";
+    position:absolute;
+    inset:14%;
+    border-radius:50%;
+    background:var(--p1);
+    opacity:.26;
+  }
+  body.turn2 .cell.ghost::after{background:var(--p2)}
+  .cell.blocked{cursor:not-allowed}
+  .cell.blocked.ghost::after{display:none}
+
+  /* ---------- tokens ---------- */
+  .token{
+    position:absolute;
+    inset:7%;
+    border-radius:50%;
+    background:
+      radial-gradient(circle at 34% 28%, var(--p1-hi) 0%, var(--p1) 48%, #b93a26 100%);
+    box-shadow:
+      inset 0 -4px 8px rgba(0,0,0,.3),
+      inset 0 3px 5px rgba(255,255,255,.34),
+      0 3px 6px rgba(0,0,0,.35);
+    will-change:transform;
+  }
+  .token.p2{
+    background:
+      radial-gradient(circle at 34% 28%, var(--p2-hi) 0%, var(--p2) 48%, #c98a16 100%);
+  }
+  .token::after{
+    content:"";
+    position:absolute;
+    left:22%;top:16%;width:30%;height:22%;
+    border-radius:50%;
+    background:rgba(255,255,255,.55);
+    filter:blur(1.5px);
+  }
+
+  @keyframes drop{
+    0%   { transform: translateY(calc(var(--cell) * var(--r) * -1.15)) scale(.96); }
+    62%  { transform: translateY(0) scale(1.04, .93); }
+    80%  { transform: translateY(calc(var(--cell) * -.10)) scale(.98, 1.03); }
+    100% { transform: translateY(0) scale(1); }
+  }
+  .token.falling{ animation: drop 520ms cubic-bezier(.34,.06,.4,1) both; }
+
+  @keyframes winpop{
+    0%,100%{ transform:scale(1) }
+    45%    { transform:scale(1.16) }
+  }
+  .cell.win .token{
+    animation: winpop 620ms ease-in-out infinite;
+    box-shadow:
+      inset 0 -4px 8px rgba(0,0,0,.3),
+      inset 0 3px 5px rgba(255,255,255,.34),
+      0 0 0 3px #fff,
+      0 0 26px 4px rgba(255,255,255,.75);
+  }
+
+  /* ---------- controls ---------- */
+  .controls{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;align-items:center;width:100%}
+  button{
+    font:inherit;font-weight:700;font-size:15px;
+    padding:12px 22px;border-radius:999px;
+    border:1px solid #d6cab4;
+    background:#fff;color:var(--ink);
+    cursor:pointer;
+    box-shadow:0 2px 0 #ddd2bd, 0 10px 18px -14px rgba(37,49,58,.6);
+    transition:transform .12s, box-shadow .12s, background .2s;
+  }
+  button:hover{background:#fffdf8}
+  button:active{transform:translateY(2px);box-shadow:0 0 0 #ddd2bd}
+  button:focus-visible{outline:3px solid var(--board);outline-offset:3px}
+  button.primary{
+    background:var(--board);border-color:var(--board-edge);color:#fff;
+    box-shadow:0 2px 0 #1b3742, 0 10px 18px -14px rgba(24,42,53,.9);
+  }
+  button.primary:hover{background:#356880}
+  button:disabled{opacity:.45;cursor:not-allowed}
+
+  .hint{font-size:13.5px;color:var(--ink-soft);text-align:center;min-height:20px}
+  .hint kbd{
+    font-family:inherit;font-size:12px;font-weight:700;
+    background:#fff;border:1px solid #d6cab4;border-bottom-width:2px;
+    border-radius:6px;padding:1px 6px;
+  }
+
+  /* ---------- banner ---------- */
+  .banner{
+    position:absolute;inset:0;
+    display:grid;place-items:center;
+    border-radius:inherit;
+    background:rgba(244,237,224,.78);
+    backdrop-filter:blur(3px);
+    opacity:0;pointer-events:none;
+    transition:opacity .28s;
+  }
+  .banner.show{opacity:1;pointer-events:auto}
+  .banner .card{
+    text-align:center;
+    background:#fff;
+    border:1px solid #ddd2bd;
+    border-radius:calc(var(--cell)*.3);
+    padding:26px 32px;
+    box-shadow:0 20px 40px -24px rgba(24,42,53,.75);
+    transform:translateY(8px) scale(.96);
+    transition:transform .3s cubic-bezier(.2,.9,.3,1.2);
+  }
+  .banner.show .card{transform:none}
+  .banner h2{font-size:clamp(20px,3.4vmin,28px);letter-spacing:-.01em;margin-bottom:6px}
+  .banner p{color:var(--ink-soft);font-size:14.5px;margin-bottom:18px}
+
+  @media (prefers-reduced-motion: reduce){
+    .token.falling{animation:none}
+    .cell.win .token{animation:none}
+    .banner,.banner .card{transition:none}
+  }
+
+  @media (max-width:430px){
+    .hud{gap:8px}
+    .turn{padding:8px 14px 8px 10px;font-size:14px}
+    button{padding:11px 16px;font-size:14px}
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <header>
+    <h1>Four <span>in a</span> <i>Row</i></h1>
+    <p class="tagline">a game for Manav</p>
+  </header>
+
+  <div class="hud">
+    <div class="turn" id="turn">
+      <span class="chip" aria-hidden="true"></span>
+      <span id="turnLabel">Red to play</span>
+    </div>
+    <div class="score">
+      <span>Red <b id="s1">0</b></span>
+      <span class="sep">·</span>
+      <span>Yellow <b id="s2">0</b></span>
+    </div>
+  </div>
+
+  <div class="board-shell">
+    <div class="board" id="board" role="grid" aria-label="Four in a row board, 7 columns by 6 rows"></div>
+    <div class="banner" id="banner">
+      <div class="card">
+        <h2 id="bannerTitle">Red wins!</h2>
+        <p id="bannerText">Four in a row.</p>
+        <button class="primary" id="bannerBtn">Play again</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="newBtn">New game</button>
+    <button id="undoBtn">Undo</button>
+    <button id="modeBtn">Play the computer</button>
+  </div>
+
+  <p class="hint" id="hint">
+    Click a column to drop. Or use <kbd>←</kbd> <kbd>→</kbd> and <kbd>Enter</kbd>.
+  </p>
+  <p aria-live="polite" class="sr-only" id="live" style="position:absolute;left:-9999px"></p>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const COLS = 7, ROWS = 6;
+  const boardEl = document.getElementById("board");
+  const turnEl = document.getElementById("turn");
+  const turnLabel = document.getElementById("turnLabel");
+  const hintEl = document.getElementById("hint");
+  const liveEl = document.getElementById("live");
+  const banner = document.getElementById("banner");
+  const bannerTitle = document.getElementById("bannerTitle");
+  const bannerText = document.getElementById("bannerText");
+  const s1 = document.getElementById("s1");
+  const s2 = document.getElementById("s2");
+  const undoBtn = document.getElementById("undoBtn");
+  const modeBtn = document.getElementById("modeBtn");
+
+  /** grid[row][col] = null | 1 | 2 ; row 0 is the TOP row */
+  let grid = [];
+  let turn = 1;          // 1 = red, 2 = yellow
+  let over = false;
+  let history = [];      // {row, col, player}
+  let vsComputer = false;
+  let scores = { 1: 0, 2: 0 };
+  let busy = false;      // blocks input while a token falls
+  let hoverCol = 3;
+
+  const cellEls = [];    // cellEls[row][col]
+
+  /* ---------------- build ---------------- */
+  function buildBoard() {
+    boardEl.innerHTML = "";
+    cellEls.length = 0;
+    for (let r = 0; r < ROWS; r++) {
+      const row = [];
+      for (let c = 0; c < COLS; c++) {
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        cell.dataset.row = r;
+        cell.dataset.col = c;
+        cell.tabIndex = r === 0 ? 0 : -1;     // roving tabindex, top row only
+        cell.setAttribute("role", "gridcell");
+        cell.setAttribute("aria-label", `column ${c + 1}, row ${r + 1}`);
+        cell.addEventListener("click", () => onColumn(c));
+        cell.addEventListener("mouseenter", () => setHover(c));
+        boardEl.appendChild(cell);
+        row.push(cell);
+      }
+      cellEls.push(row);
+    }
+    boardEl.addEventListener("mouseleave", () => setHover(-1));
+  }
+
+  /* ---------------- state helpers ---------------- */
+  function emptyGrid() {
+    grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+  }
+
+  function lowestEmptyRow(col) {
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (grid[r][col] === null) return r;
+    }
+    return -1;
+  }
+
+  /** returns array of [r,c] for a 4-run through (row,col), or null */
+  function findWin(row, col, player) {
+    const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
+    for (const [dr, dc] of dirs) {
+      const line = [[row, col]];
+      for (const sign of [1, -1]) {
+        let r = row + dr * sign, c = col + dc * sign;
+        while (r >= 0 && r < ROWS && c >= 0 && c < COLS && grid[r][c] === player) {
+          line.push([r, c]);
+          r += dr * sign; c += dc * sign;
+        }
+      }
+      if (line.length >= 4) {
+        // return exactly the longest run (trim extras beyond 4 for display)
+        return line;
+      }
+    }
+    return null;
+  }
+
+  function isFull() {
+    return grid[0].every(v => v !== null);
+  }
+
+  /* ---------------- rendering ---------------- */
+  function render() {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = cellEls[r][c];
+        const val = grid[r][c];
+        const existing = cell.querySelector(".token");
+        if (val === null) {
+          if (existing) existing.remove();
+          cell.classList.remove("win");
+        } else if (!existing) {
+          const t = document.createElement("div");
+          t.className = "token" + (val === 2 ? " p2" : "");
+          t.dataset.player = val;
+          cell.appendChild(t);
+        }
+      }
+    }
+    // turn chrome
+    turnEl.classList.toggle("p2", turn === 2 && !over);
+    if (!over) turnLabel.textContent = turn === 1 ? "Red to play" : "Yellow to play";
+    document.body.classList.toggle("turn2", turn === 2);
+    s1.textContent = scores[1];
+    s2.textContent = scores[2];
+    undoBtn.disabled = history.length === 0 || over;
+  }
+
+  function setHover(col) {
+    hoverCol = col;
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++) cellEls[r][c].classList.remove("ghost");
+
+    if (col < 0 || over) return;
+    const row = lowestEmptyRow(col);
+    if (row === -1) return;
+    cellEls[row][col].classList.add("ghost");
+  }
+
+  function announce(msg) { liveEl.textContent = msg; }
+
+  /* ---------------- moves ---------------- */
+  function onColumn(col) {
+    if (over || busy) return;
+    if (vsComputer && turn === 2) return;    // computer's turn
+    drop(col);
+  }
+
+  function drop(col) {
+    const row = lowestEmptyRow(col);
+    if (row === -1) return;
+
+    const player = turn;
+    grid[row][col] = player;
+    history.push({ row, col, player });
+
+    // build the token with a fall animation
+    const cell = cellEls[row][col];
+    cell.classList.remove("ghost");
+    const t = document.createElement("div");
+    t.className = "token falling" + (player === 2 ? " p2" : "");
+    t.style.setProperty("--r", String(row + 1));
+    cell.appendChild(t);
+
+    busy = true;
+    const done = () => {
+      busy = false;
+      t.classList.remove("falling");
+      t.style.removeProperty("--r");
+    };
+    t.addEventListener("animationend", done, { once: true });
+    setTimeout(done, 620);   // safety net if animations are disabled
+
+    const line = findWin(row, col, player);
+    if (line) {
+      over = true;
+      line.forEach(([r, c]) => cellEls[r][c].classList.add("win"));
+      scores[player]++;
+      turnLabel.textContent = player === 1 ? "Red wins" : "Yellow wins";
+      showBanner(player === 1 ? "Red wins!" : "Yellow wins!",
+                 "Four in a row. Nice one.");
+      announce(`Game over. ${player === 1 ? "Red" : "Yellow"} wins.`);
+      s1.textContent = scores[1];
+      s2.textContent = scores[2];
+      undoBtn.disabled = true;
+      return;
+    }
+
+    if (isFull()) {
+      over = true;
+      turnLabel.textContent = "Draw";
+      showBanner("It's a draw", "The board is full. Nobody wins this one.");
+      announce("Game over. It is a draw.");
+      undoBtn.disabled = true;
+      return;
+    }
+
+    turn = player === 1 ? 2 : 1;
+    render();
+    setHover(hoverCol);
+    announce(`${turn === 1 ? "Red" : "Yellow"} to play.`);
+
+    if (vsComputer && turn === 2) {
+      setTimeout(computerMove, 420);
+    }
+  }
+
+  /* ---------------- computer ---------------- */
+  function winningMoveFor(player) {
+    for (let c = 0; c < COLS; c++) {
+      const r = lowestEmptyRow(c);
+      if (r === -1) continue;
+      grid[r][c] = player;
+      const win = findWin(r, c, player);
+      grid[r][c] = null;
+      if (win) return c;
+    }
+    return -1;
+  }
+
+  function computerMove() {
+    if (over) return;
+    let col = winningMoveFor(2);            // take a win
+    if (col === -1) {
+      const block = winningMoveFor(1);      // block a loss
+      // friendly: only blocks most of the time
+      if (block !== -1 && Math.random() < 0.8) col = block;
+    }
+    if (col === -1) {
+      const open = [];
+      for (let c = 0; c < COLS; c++) if (lowestEmptyRow(c) !== -1) open.push(c);
+      // prefer the middle a little
+      const weights = open.map(c => (c === 3 ? 3 : c === 2 || c === 4 ? 2 : 1));
+      const total = weights.reduce((a, b) => a + b, 0);
+      let pick = Math.random() * total;
+      for (let i = 0; i < open.length; i++) {
+        pick -= weights[i];
+        if (pick <= 0) { col = open[i]; break; }
+      }
+      if (col === -1) col = open[0];
+    }
+    drop(col);
+  }
+
+  /* ---------------- banner ---------------- */
+  function showBanner(title, text) {
+    bannerTitle.textContent = title;
+    bannerText.textContent = text;
+    banner.classList.add("show");
+  }
+  function hideBanner() { banner.classList.remove("show"); }
+
+  /* ---------------- controls ---------------- */
+  function newGame(keepMode = true) {
+    emptyGrid();
+    turn = 1;
+    over = false;
+    busy = false;
+    history = [];
+    hideBanner();
+    buildBoard();
+    render();
+    setHover(-1);
+    turnLabel.textContent = "Red to play";
+    announce("New game. Red to play.");
+    if (!keepMode) { /* nothing */ }
+  }
+
+  function undo() {
+    if (over || history.length === 0 || busy) return;
+    // in computer mode, undo both the computer's move and yours
+    const steps = (vsComputer && history.length >= 2) ? 2 : 1;
+    for (let i = 0; i < steps; i++) {
+      const last = history.pop();
+      if (!last) break;
+      grid[last.row][last.col] = null;
+      turn = last.player;
+    }
+    turn = history.length ? (history[history.length - 1].player === 1 ? 2 : 1) : 1;
+    hideBanner();
+    render();
+    setHover(-1);
+    announce(`Undone. ${turn === 1 ? "Red" : "Yellow"} to play.`);
+  }
+
+  document.getElementById("newBtn").addEventListener("click", () => newGame());
+  document.getElementById("bannerBtn").addEventListener("click", () => newGame());
+  undoBtn.addEventListener("click", undo);
+  modeBtn.addEventListener("click", () => {
+    vsComputer = !vsComputer;
+    modeBtn.textContent = vsComputer ? "Two players" : "Play the computer";
+    hintEl.innerHTML = vsComputer
+      ? "You are <b>Red</b>. The computer plays yellow."
+      : "Click a column to drop. Or use <kbd>←</kbd> <kbd>→</kbd> and <kbd>Enter</kbd>.";
+    newGame();
+  });
+
+  /* keyboard: arrows move between columns, enter drops */
+  document.addEventListener("keydown", (e) => {
+    if (over) return;
+    const colFromFocus = () => {
+      const a = document.activeElement;
+      return a && a.dataset && a.dataset.col !== undefined ? Number(a.dataset.col) : -1;
+    };
+    let c = colFromFocus();
+    if (c === -1) c = hoverCol === -1 ? 3 : hoverCol;
+
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const next = Math.max(0, Math.min(COLS - 1, c + (e.key === "ArrowLeft" ? -1 : 1)));
+      setHover(next);
+      cellEls[0][next].focus();
+    } else if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+      e.preventDefault();
+      onColumn(c);
+    }
+  });
+
+  /* ---------------- boot ---------------- */
+  emptyGrid();
+  buildBoard();
+  render();
+
+  /* ---------------- self test (open with ?test=1) ---------------- */
+  if (new URLSearchParams(location.search).get("test") === "1") {
+    const results = [];
+    const t = (name, cond) => results.push([name, !!cond]);
+
+    // horizontal win
+    emptyGrid();
+    for (let c = 0; c < 3; c++) grid[5][c] = 1;
+    grid[5][3] = 1;
+    t("horizontal win", findWin(5, 3, 1) !== null);
+
+    // vertical win
+    emptyGrid();
+    for (let r = 5; r > 1; r--) grid[r][2] = 2;
+    t("vertical win", findWin(2, 2, 2) !== null);
+
+    // diagonal down-right
+    emptyGrid();
+    grid[2][0] = 1; grid[3][1] = 1; grid[4][2] = 1; grid[5][3] = 1;
+    t("diagonal win", findWin(5, 3, 1) !== null);
+
+    // diagonal up-right
+    emptyGrid();
+    grid[5][0] = 2; grid[4][1] = 2; grid[3][2] = 2; grid[2][3] = 2;
+    t("anti-diagonal win", findWin(2, 3, 2) !== null);
+
+    // no false positive
+    emptyGrid();
+    grid[5][0] = 1; grid[5][1] = 1; grid[5][2] = 1;
+    t("three is not a win", findWin(5, 2, 1) === null);
+
+    // gravity
+    emptyGrid();
+    t("lowest empty is bottom", lowestEmptyRow(0) === ROWS - 1);
+    grid[5][0] = 1;
+    t("lowest empty moves up", lowestEmptyRow(0) === ROWS - 2);
+
+    // full column is unplayable
+    emptyGrid();
+    for (let r = 0; r < ROWS; r++) grid[r][6] = 1;
+    t("full column rejected", lowestEmptyRow(6) === -1);
+
+    // full board detection
+    emptyGrid();
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) grid[r][c] = 1;
+    t("full board detected", isFull());
+
+    // computer finds an immediate win
+    emptyGrid();
+    grid[5][0] = 2; grid[5][1] = 2; grid[5][2] = 2;
+    t("computer spots a win", winningMoveFor(2) === 3);
+
+    const pass = results.filter(r => r[1]).length;
+    document.documentElement.dataset.tests = `pass:${pass}/${results.length}`;
+    document.documentElement.dataset.failures =
+      results.filter(r => !r[1]).map(r => r[0]).join("|") || "none";
+    console.log("SELFTEST", document.documentElement.dataset.tests,
+                document.documentElement.dataset.failures);
+    emptyGrid();
+    render();
+  }
+})();
+</script>
+</body>
+</html>
