@@ -24,10 +24,18 @@ You can play against another person on the same screen, or against the computer.
   so you get your turn back.
 - **New game** clears the board. The score keeps counting until you reload.
 
-## The computer opponent
+## Levels
 
-It is built to be beatable by a child. It takes a win when one is available and blocks
-your four most of the time, but not always. No lookahead search, no perfect play.
+Switch to computer mode and pick a level.
+
+| Level | How it plays |
+|---|---|
+| **Easy** | Takes a free win about half the time and never blocks on purpose. For a first game against a grown up. |
+| **Medium** | Always takes a win, always blocks an immediate four, then looks four moves ahead. |
+| **Hard** | Full search up to nine moves deep with alpha-beta pruning and a time budget, so it never freezes the page. It sees threats two moves before they land. |
+
+Hard is genuinely hard. On a 7 by 6 board the first player has the advantage, so if it
+feels unbeatable, hold the centre column and build outward from there.
 
 ## Accessibility
 
@@ -43,13 +51,13 @@ The file carries its own logic tests. Open `index.html?test=1` and the result ap
 the root element as `data-tests`:
 
 ```
-data-tests="pass:10/10"
+data-tests="pass:15/15"
 data-failures="none"
 ```
 
 It covers horizontal, vertical and both diagonal wins, that three in a row is not a win,
-gravity, a full column being unplayable, a full board counting as a draw, and the
-computer spotting an immediate win.
+gravity, a full column being unplayable, a full board counting as a draw, and each
+difficulty taking a win and blocking a horizontal and vertical threat.
 
 ## Running locally
 

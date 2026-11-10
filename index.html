@@ -210,6 +210,35 @@
   button.primary:hover{background:#356880}
   button:disabled{opacity:.45;cursor:not-allowed}
 
+  /* ---------- difficulty ---------- */
+  .levels{
+    display:flex;align-items:center;gap:12px;
+    flex-wrap:wrap;justify-content:center;width:100%;
+  }
+  .levels[hidden]{display:none}
+  .levels-label{
+    font-size:11.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-soft);
+  }
+  .seg{
+    display:inline-flex;gap:2px;
+    background:#fff;border:1px solid #d6cab4;border-radius:999px;padding:4px;
+    box-shadow:0 2px 0 #ddd2bd;
+  }
+  .seg button{
+    border:none;background:transparent;box-shadow:none;
+    padding:8px 18px;font-size:14px;font-weight:700;border-radius:999px;
+    color:var(--ink-soft);
+  }
+  .seg button:hover{background:#f6f1e7;color:var(--ink)}
+  .seg button:active{transform:none;box-shadow:none}
+  .seg button.on{
+    background:var(--board);color:#fff;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.22);
+  }
+  .seg button.on:hover{background:var(--board);color:#fff}
+  .seg button:focus-visible{outline:3px solid var(--board);outline-offset:2px}
+
   .hint{font-size:13.5px;color:var(--ink-soft);text-align:center;min-height:20px}
   .hint kbd{
     font-family:inherit;font-size:12px;font-weight:700;
@@ -291,6 +320,15 @@
     <button id="modeBtn">Play the computer</button>
   </div>
 
+  <div class="levels" id="levels" hidden>
+    <span class="levels-label">Computer level</span>
+    <div class="seg" role="group" aria-label="Computer difficulty">
+      <button type="button" data-level="easy" class="on">Easy</button>
+      <button type="button" data-level="medium">Medium</button>
+      <button type="button" data-level="hard">Hard</button>
+    </div>
+  </div>
+
   <p class="hint" id="hint">
     Click a column to drop. Or use <kbd>←</kbd> <kbd>→</kbd> and <kbd>Enter</kbd>.
   </p>
@@ -314,6 +352,7 @@
   const s2 = document.getElementById("s2");
   const undoBtn = document.getElementById("undoBtn");
   const modeBtn = document.getElementById("modeBtn");
+  const levelsEl = document.getElementById("levels");
 
   /** grid[row][col] = null | 1 | 2 ; row 0 is the TOP row */
   let grid = [];
@@ -321,6 +360,7 @@
   let over = false;
   let history = [];      // {row, col, player}
   let vsComputer = false;
+  let level = "easy";    // easy | medium | hard
   let scores = { 1: 0, 2: 0 };
   let busy = false;      // blocks input while a token falls
   let hoverCol = 3;
@@ -493,41 +533,191 @@
     }
   }
 
-  /* ---------------- computer ---------------- */
-  function winningMoveFor(player) {
+  /* ================= computer opponent ================= */
+  /* Board is mirrored into a flat Int8Array for the search, so the
+     minimax can make and unmake moves without cloning. */
+
+  const WIN_WINDOWS = (() => {
+    const w = [];
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const i = r * COLS + c;
+        if (c + 3 < COLS) w.push([i, i + 1, i + 2, i + 3]);
+        if (r + 3 < ROWS) w.push([i, i + COLS, i + COLS * 2, i + COLS * 3]);
+        if (r + 3 < ROWS && c + 3 < COLS) w.push([i, i + COLS + 1, i + COLS * 2 + 2, i + COLS * 3 + 3]);
+        if (r + 3 < ROWS && c - 3 >= 0) w.push([i, i + COLS - 1, i + COLS * 2 - 2, i + COLS * 3 - 3]);
+      }
+    }
+    return w;
+  })();
+
+  const ORDER = [3, 2, 4, 1, 5, 0, 6];     // centre-first move ordering
+  const WEIGHT = [0, 1, 12, 70];           // n discs in a window
+
+  function winsAt(cells, r, c, p) {
+    for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+      let n = 1;
+      for (const s of [1, -1]) {
+        let rr = r + dr * s, cc = c + dc * s;
+        while (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS && cells[rr * COLS + cc] === p) {
+          n++; rr += dr * s; cc += dc * s;
+        }
+      }
+      if (n >= 4) return true;
+    }
+    return false;
+  }
+
+  function evaluate(cells, me, opp) {
+    let score = 0;
+    for (let k = 0; k < WIN_WINDOWS.length; k++) {
+      const win = WIN_WINDOWS[k];
+      let mine = 0, theirs = 0;
+      for (let j = 0; j < 4; j++) {
+        const v = cells[win[j]];
+        if (v === me) mine++;
+        else if (v === opp) theirs++;
+      }
+      if (mine && theirs) continue;              // blocked window is worthless
+      if (mine) score += WEIGHT[mine];
+      else if (theirs) score -= WEIGHT[theirs] * 1.1;
+    }
+    for (let r = 0; r < ROWS; r++) {             // centre control
+      const v = cells[r * COLS + 3];
+      if (v === me) score += 5;
+      else if (v === opp) score -= 5;
+    }
+    return score;
+  }
+
+  let deadline = 0;
+
+  function search(cells, heights, depth, alpha, beta, turn, me, opp, ply) {
+    if (depth <= 0 || performance.now() > deadline) return evaluate(cells, me, opp);
+    let any = false;
+    let best = turn === me ? -Infinity : Infinity;
+
+    for (let k = 0; k < ORDER.length; k++) {
+      const c = ORDER[k];
+      if (heights[c] >= ROWS) continue;
+      any = true;
+      const r = ROWS - 1 - heights[c];
+      cells[r * COLS + c] = turn; heights[c]++;
+
+      let val;
+      if (winsAt(cells, r, c, turn)) {
+        val = turn === me ? 100000 - ply : -100000 + ply;
+      } else {
+        val = search(cells, heights, depth - 1, alpha, beta,
+                     turn === me ? opp : me, me, opp, ply + 1);
+      }
+
+      cells[r * COLS + c] = 0; heights[c]--;
+
+      if (turn === me) {
+        if (val > best) best = val;
+        if (best > alpha) alpha = best;
+      } else {
+        if (val < best) best = val;
+        if (best < beta) beta = best;
+      }
+      if (alpha >= beta) break;
+    }
+    return any ? best : 0;
+  }
+
+  /* Iterative deepening with a time budget, so the UI never locks up. */
+  function searchRoot(cells, heights, maxDepth, budgetMs) {
+    deadline = performance.now() + budgetMs;
+    let bestCol = -1, bestVal = -Infinity;
+
+    for (let d = 1; d <= maxDepth; d++) {
+      let localBest = -Infinity, localCol = -1, alpha = -Infinity;
+      for (let k = 0; k < ORDER.length; k++) {
+        const c = ORDER[k];
+        if (heights[c] >= ROWS) continue;
+        const r = ROWS - 1 - heights[c];
+        cells[r * COLS + c] = 2; heights[c]++;
+
+        let val;
+        if (winsAt(cells, r, c, 2)) val = 100000;
+        else val = search(cells, heights, d - 1, alpha, Infinity, 1, 2, 1, 1);
+
+        cells[r * COLS + c] = 0; heights[c]--;
+
+        if (val > localBest) { localBest = val; localCol = c; }
+        if (localBest > alpha) alpha = localBest;
+      }
+      if (localCol !== -1) { bestCol = localCol; bestVal = localBest; }
+      if (performance.now() > deadline) break;
+      if (bestVal >= 100000) break;              // a win is already found
+    }
+    return bestCol;
+  }
+
+  function toBoardState() {
+    const cells = new Int8Array(ROWS * COLS);
+    const heights = new Int8Array(COLS);
     for (let c = 0; c < COLS; c++) {
-      const r = lowestEmptyRow(c);
-      if (r === -1) continue;
-      grid[r][c] = player;
-      const win = findWin(r, c, player);
-      grid[r][c] = null;
-      if (win) return c;
+      let h = 0;
+      for (let r = ROWS - 1; r >= 0; r--) {
+        const v = grid[r][c];
+        if (v !== null) { cells[r * COLS + c] = v; h++; }
+      }
+      heights[c] = h;
+    }
+    return { cells, heights };
+  }
+
+  function immediateWinCol(cells, heights, p) {
+    for (let k = 0; k < ORDER.length; k++) {
+      const c = ORDER[k];
+      if (heights[c] >= ROWS) continue;
+      const r = ROWS - 1 - heights[c];
+      cells[r * COLS + c] = p;
+      const w = winsAt(cells, r, c, p);
+      cells[r * COLS + c] = 0;
+      if (w) return c;
     }
     return -1;
   }
 
-  function computerMove() {
-    if (over) return;
-    let col = winningMoveFor(2);            // take a win
-    if (col === -1) {
-      const block = winningMoveFor(1);      // block a loss
-      // friendly: only blocks most of the time
-      if (block !== -1 && Math.random() < 0.8) col = block;
-    }
-    if (col === -1) {
-      const open = [];
-      for (let c = 0; c < COLS; c++) if (lowestEmptyRow(c) !== -1) open.push(c);
-      // prefer the middle a little
-      const weights = open.map(c => (c === 3 ? 3 : c === 2 || c === 4 ? 2 : 1));
+  function chooseMove(levelName) {
+    const { cells, heights } = toBoardState();
+    const open = ORDER.filter(c => heights[c] < ROWS);
+    if (!open.length) return -1;
+
+    // every level takes a free win
+    const win = immediateWinCol(cells, heights, 2);
+    if (win !== -1 && (levelName !== "easy" || Math.random() < 0.6)) return win;
+
+    if (levelName === "easy") {
+      // no blocking on purpose, mild centre preference
+      const weights = open.map(c => (c === 3 ? 2 : 1));
       const total = weights.reduce((a, b) => a + b, 0);
       let pick = Math.random() * total;
       for (let i = 0; i < open.length; i++) {
         pick -= weights[i];
-        if (pick <= 0) { col = open[i]; break; }
+        if (pick <= 0) return open[i];
       }
-      if (col === -1) col = open[0];
+      return open[0];
     }
-    drop(col);
+
+    if (levelName === "medium") {
+      const block = immediateWinCol(cells, heights, 1);
+      if (block !== -1) return block;
+      const col = searchRoot(cells, heights, 4, 140);
+      return col === -1 ? open[0] : col;
+    }
+
+    const col = searchRoot(cells, heights, 9, 380);
+    return col === -1 ? open[0] : col;
+  }
+
+  function computerMove() {
+    if (over) return;
+    const col = chooseMove(level);
+    if (col >= 0) drop(col);
   }
 
   /* ---------------- banner ---------------- */
@@ -571,16 +761,33 @@
     announce(`Undone. ${turn === 1 ? "Red" : "Yellow"} to play.`);
   }
 
+  function updateHint() {
+    if (!vsComputer) {
+      hintEl.innerHTML = 'Click a column to drop. Or use <kbd>←</kbd> <kbd>→</kbd> and <kbd>Enter</kbd>.';
+      return;
+    }
+    const name = level === "easy" ? "Easy" : level === "medium" ? "Medium" : "Hard";
+    hintEl.innerHTML = `You are <b>Red</b>. The computer plays yellow on <b>${name}</b>.`;
+  }
+
   document.getElementById("newBtn").addEventListener("click", () => newGame());
   document.getElementById("bannerBtn").addEventListener("click", () => newGame());
   undoBtn.addEventListener("click", undo);
+
   modeBtn.addEventListener("click", () => {
     vsComputer = !vsComputer;
     modeBtn.textContent = vsComputer ? "Two players" : "Play the computer";
-    hintEl.innerHTML = vsComputer
-      ? "You are <b>Red</b>. The computer plays yellow."
-      : "Click a column to drop. Or use <kbd>←</kbd> <kbd>→</kbd> and <kbd>Enter</kbd>.";
+    levelsEl.hidden = !vsComputer;
+    updateHint();
     newGame();
+  });
+
+  levelsEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-level]");
+    if (!btn) return;
+    level = btn.dataset.level;
+    levelsEl.querySelectorAll("[data-level]").forEach(b => b.classList.toggle("on", b === btn));
+    updateHint();
   });
 
   /* keyboard: arrows move between columns, enter drops */
@@ -656,10 +863,35 @@
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) grid[r][c] = 1;
     t("full board detected", isFull());
 
-    // computer finds an immediate win
+    // ---- computer difficulty ----
+    // every level takes a free win (easy is probabilistic, so check the others)
     emptyGrid();
     grid[5][0] = 2; grid[5][1] = 2; grid[5][2] = 2;
-    t("computer spots a win", winningMoveFor(2) === 3);
+    t("medium takes a win", chooseMove("medium") === 3);
+    emptyGrid();
+    grid[5][0] = 2; grid[5][1] = 2; grid[5][2] = 2;
+    t("hard takes a win", chooseMove("hard") === 3);
+
+    // both must block an open three on the left, or lose next move
+    emptyGrid();
+    grid[5][0] = 1; grid[5][1] = 1; grid[5][2] = 1;
+    grid[5][5] = 2; grid[5][6] = 2;
+    t("medium blocks a three", chooseMove("medium") === 3);
+    emptyGrid();
+    grid[5][0] = 1; grid[5][1] = 1; grid[5][2] = 1;
+    grid[5][5] = 2; grid[5][6] = 2;
+    t("hard blocks a three", chooseMove("hard") === 3);
+
+    // hard must block a vertical threat too
+    emptyGrid();
+    grid[5][4] = 1; grid[4][4] = 1; grid[3][4] = 1;
+    grid[5][0] = 2; grid[5][1] = 2;
+    t("hard blocks a vertical three", chooseMove("hard") === 4);
+
+    // easy always returns a legal, playable column
+    emptyGrid();
+    const easyCol = chooseMove("easy");
+    t("easy returns a legal move", easyCol >= 0 && easyCol < COLS && lowestEmptyRow(easyCol) !== -1);
 
     const pass = results.filter(r => r[1]).length;
     document.documentElement.dataset.tests = `pass:${pass}/${results.length}`;
